@@ -1,11 +1,12 @@
 <?php
-namespace Netpascal\Uninvoice\Controller\Adminhtml\Invoice;
+namespace Netpascal\Uninvoice\Controller\Adminhtml\Creditmemo;
 
 use Magento\Backend\App\Action\Context;
 use Magento\Sales\Model\OrderRepository;
 use Magento\Sales\Model\ResourceModel\Grid as GridRepository;
 use Magento\Sales\Api\TransactionRepositoryInterface;
 use Magento\Framework\App\ObjectManager;
+use Magento\Sales\Api\CreditmemoRepositoryInterface;
 
 class Delete extends \Magento\Backend\App\Action
 {
@@ -16,14 +17,10 @@ class Delete extends \Magento\Backend\App\Action
     private $orderRepository;
 
     /**
-     * @var GridRepository
-     */
-    private $invoiceGridRepository;
-
-    /**
      * @var TransactionRepositoryInterface
      */
     protected $transactionRepository;
+
 
     /**
      * Authorization level of a basic admin session
@@ -36,7 +33,7 @@ class Delete extends \Magento\Backend\App\Action
      * 
      * @param Context $context 
      * @param OrderRepository $orderRepository 
-     * @param GridRepository $invoiceGridRepository 
+     * @param GridRepository $creditmemoGridRepository 
      * @param mixed #Parameter#6b5f562 
      * @return void 
      */
@@ -48,43 +45,43 @@ class Delete extends \Magento\Backend\App\Action
     {
         $this->orderRepository = $orderRepository;
         $this->transactionRepository = $transactionRepository;
-        $this->invoiceGridRepository = ObjectManager::getInstance()->get("Magento\Sales\Model\ResourceModel\Order\Invoice\Grid");
         parent::__construct($context);
     }
 
     public function execute()
     {
         $order = $this->orderRepository->get($this->getRequest()->getParam('order_id'));
+        $creditmemoCollection = $order->getCreditmemosCollection();
+        foreach ($creditmemoCollection as $creditmemo) {
+            $creditmemo->isDeleted(true);
+            $order->addRelatedObject($creditmemo);
+        }
         $invoiceCollection = $order->getInvoiceCollection();
-        $rowToPurge = [];
         foreach ($invoiceCollection as $invoice) {
-            $rowToPurge[$invoice->getId()] = $invoice->getIncrementId();
-            $invoice->isDeleted(true);
+            $invoice->setData("is_used_for_refund", false);
+            $invoice->setData("base_total_refunded", 0);
             $order->addRelatedObject($invoice);
         }
         foreach ([
-            "state"=>"pending",
-            "status"=>"pending",
-            "total_paid"=>0,
-            "subtotal_invoiced"=>0,
-            "base_total_paid"=>0,
-            "base_shipping_invoiced"=>0,
-            "base_subtotal_invoiced"=>0,
-            "base_total_invoiced"=>0,
-            "total_invoiced"=>0,
+            "state"=>"processing",
+            "status"=>"processing",
+            "base_subtotal_refunded"=>0,
+            "subtotal_refunded"=>0,
+            "base_total_online_refunded"=>0,
+            "total_online_refunded"=>0,
+            "base_total_refunded"=>0,
+            "total_refunded"=>0,
+            "base_shipping_refunded"=>0,
         ] as $key => $value) {
             $order->setData($key, $value);
         }
         $items = $order->getItems();
         foreach ($items as $item) {
             foreach ([
-                "qty_invoiced"=>0, 
-                "discount_invoiced"=>0, 
-                "base_discount_invoiced"=>0,
-                "tax_invoiced"=>0,
-                "base_tax_invoiced"=>0,
-                "row_invoiced"=>0, 
-                "base_row_invoiced"=>0
+                "qty_refunded"=>0,
+                "amount_refunded"=>0,
+                "base_amount_refunded"=>0,
+                "tax_refunded"=>0,
             ] as $key => $value) {
                 $item->setData($key, $value);
             }
@@ -94,14 +91,19 @@ class Delete extends \Magento\Backend\App\Action
             $order->getPayment()->getId(),
             $order->getId()
         );
+
+        $order->getPayment()->setData("refunded_amount", 0);
+        $childrenPayments = $order->getPayment()->getExtensionAttributes()->getChildrenPayments();
+        foreach($childrenPayments as $payment) {
+            $payment->setData("refunded_amount", 0);
+            $order->addRelatedObject($payment);
+        }
+
         $transaction->setIsClosed(false);
         $order->addRelatedObject($transaction);
         $order->save();
-        $this->messageManager->addNoticeMessage(__('Order %1 restaured in pending state.', $order->getIncrementId()));
-        foreach ($rowToPurge as $invoiceId => $invoiceIncrementId) {
-            $this->invoiceGridRepository->purge($invoiceId);
-            $this->messageManager->addNoticeMessage(__('Invoice %1 deleted.', $invoiceIncrementId));
-        }
+        $this->messageManager->addNoticeMessage(__('Order %1 restaured in processing state.', $order->getIncrementId()));
+        
         $resultRedirect = $this->resultRedirectFactory->create();
         return $resultRedirect->setUrl($this->_redirect->getRefererUrl());
     }

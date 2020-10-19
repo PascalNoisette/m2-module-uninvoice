@@ -31,11 +31,9 @@ class View
      */
     public function beforeSetLayout(\Magento\Sales\Block\Adminhtml\Order\View $view)
     {
-        if ($view->getOrder()->canInvoice()) {
-            return;
-        }
-        $view->addButton(
-            'uninvoice',
+        if (!$view->getOrder()->canInvoice()) {
+            $view->addButton(
+                'uninvoice',
                 [
                     'label' => __('Uninvoice'),
                     'onclick' => 'setLocation(\'' . $view->getUrl(
@@ -46,6 +44,20 @@ class View
                     ) . '\')'
                 ]
             );
+        }
+        
+        $view->addButton(
+            'unrefund',
+            [
+                'label' => __('Unrefund'),
+                'onclick' => 'setLocation(\'' . $view->getUrl(
+                    'netpascal_uninvoice/creditmemo/delete',
+                    [
+                        'order_id' => $view->getOrderId(),
+                    ]
+                ) . '\')'
+            ]
+        );
 
     }
 }
